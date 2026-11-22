@@ -392,6 +392,25 @@
 
   /* commandements */
   .rules-list{ width:min(680px,92%); margin-top:14px; padding:0 0 24px; list-style:none; counter-reset:rule; text-align:left; display:flex; flex-direction:column; gap:16px; }
+  .rules-bar{ position:absolute; top:18px; right:64px; display:flex; gap:8px; z-index:2; }
+  .rules-bar .emb-edit-btn{ position:static; }
+  .rule-body{ display:flex; flex-direction:column; gap:6px; flex:1; }
+  .rule-subs{ margin:0; padding:0 0 0 1.1em; list-style:disc; color:var(--ink-soft); font-size:14px; line-height:1.55; display:flex; flex-direction:column; gap:3px; }
+  .rules-list .rule-subs li{ display:list-item; counter-increment:none; font-size:14px; gap:0; }
+  .rules-list .rule-subs li::before{ content:none; }
+  .rl-card{ border:1px solid var(--line); border-radius:12px; padding:10px; display:flex; flex-direction:column; gap:8px; }
+  .rl-num{ font-family:var(--font-display); color:var(--teal); padding-top:8px; min-width:1.6em; text-align:right; }
+  .rl-subs{ margin-left:2em; display:flex; flex-direction:column; gap:6px; }
+  .rl-sub{ display:flex; gap:8px; align-items:flex-start; }
+  .rl-sub textarea{ flex:1; min-height:40px; font-size:13px; line-height:1.45; resize:none; overflow:hidden; }
+  .rl-dot{ color:var(--ink-soft); padding-top:8px; }
+  .rl-sub-actions{ display:flex; gap:4px; }
+  .rl-sub-actions button, .rl-addsub{ font-size:12px; padding:5px 8px; border-radius:8px; border:1px solid var(--line); background:var(--bg-soft); color:var(--ink); cursor:pointer; }
+  .rl-sub-actions button:disabled{ opacity:.35; cursor:default; } .rl-sub-actions button.armed{ border-color:#C0554A; color:#E8908A; }
+  .rl-addsub{ align-self:flex-start; background:none; border-style:dashed; color:var(--ink-soft); }
+  .gc-rule-subs{ margin:4px 0 0; padding-left:1.1em; font-size:13.5px; color:var(--ink-soft); }
+  .gc-rule-opt{ font-size:12.5px; color:var(--ink-soft); display:flex; gap:8px; align-items:center; text-align:left; }
+  .gc-rule-pick small{ display:block; margin-top:4px; color:var(--ink-soft); font-size:12.5px; }
   .rules-list li{ counter-increment:rule; display:flex; gap:14px; align-items:baseline; line-height:1.6; font-size:15.5px; }
   .rules-list li::before{ content:counter(rule) "."; flex:0 0 2.2em; text-align:right; font-family:var(--font-display); color:var(--teal); font-size:15px; }
 
@@ -934,7 +953,13 @@ function mergeById(local, cloud){
 function mergeCloudInto(c){
   traumas = mergeById(traumas, c.traumas); folders = mergeById(folders, c.folders); recentTraumas = mergeById(recentTraumas, c.recentTraumas);
   if(Array.isArray(c.embodiment)) embodimentItems = mergeById(embodimentItems, c.embodiment);
-  if(Array.isArray(c.commandments)) rulesItems = mergeById(rulesItems, c.commandments);
+  if(Array.isArray(c.commandments)){
+    rulesItems = mergeById(rulesItems, c.commandments);
+    rulesItems.forEach(r=>{ /* règles détaillées : union par identifiant au sein d'un même commandement */
+      const cr = c.commandments.find(x=> x && x.id===r.id);
+      if(cr && Array.isArray(cr.subs)){ r.subs = mergeById(r.subs||[], cr.subs); }
+    });
+  }
   if(Array.isArray(c.sosAffirmations)) sosAffirmations = sosAffirmations.concat(c.sosAffirmations.filter(x=> !sosAffirmations.includes(x)));
   const cg = gcFix(c.groupchat);
   if(cg){
@@ -1858,6 +1883,7 @@ function renderGroupChat(){
         ${m.kind==='rule' ? `<div class="gc-rule-label">Commandement n°${m.num}</div>` : ''}
         ${quote}
         <div class="gc-text">${gcHighlight(m.text, q)}</div>
+        ${m.kind==='rule' && m.subs && m.subs.length ? `<ul class="gc-rule-subs">${m.subs.map(t=>`<li>${gcHighlight(t, q)}</li>`).join('')}</ul>` : ''}
         ${reacts}
         <div class="gc-meta">${gcTime(m.ts)}${m.edited?' · modifié':''}</div>
         ${goto}${acts}
@@ -1868,7 +1894,7 @@ function renderGroupChat(){
     const q = gcQuery.trim();
     const all = groupchat.messages;
     let list = all, more = false;
-    if(q){ list = all.filter(m=> m.kind!=='join' && (gcMatches(m.text||'',q).length || (m.tag && gcMatches(m.tag,q).length) || ((m.kind==='msg' || m.kind==='rule') && gcMatches(gcWho(m.from).name,q).length))); }
+    if(q){ list = all.filter(m=> m.kind!=='join' && (gcMatches(m.text||'',q).length || (m.subs && m.subs.some(t=>gcMatches(t,q).length)) || (m.tag && gcMatches(m.tag,q).length) || ((m.kind==='msg' || m.kind==='rule') && gcMatches(gcWho(m.from).name,q).length))); }
     else if(all.length>gcLimit){ list = all.slice(all.length-gcLimit); more = true; }
     $q('#gc-count').textContent = q ? (list.length+' résultat'+(list.length>1?'s':'')) : '';
     const prevH = thread.scrollHeight, prevTop = thread.scrollTop;
@@ -2170,12 +2196,13 @@ function renderGroupChat(){
     (existing ? tx : nt).focus();
   }
   function openRulePicker(){
-    const rules = rulesItems.filter(x=> x.text.trim());
+    const rules = rulesItems.filter(ruleShown);
     const ov = document.createElement('div'); ov.className = 'modal-overlay';
     ov.innerHTML = `<div class="modal-panel" role="dialog" aria-label="Rappeler un commandement">
       <div class="modal-head"><h3>Rappeler un commandement</h3></div>
       <div class="modal-body">${rules.length ? `<p class="sub" style="margin:0;text-align:left;">Choisis la règle à citer dans la conversation (elle sera postée en ton nom).</p>`
-        + rules.map((r,i)=>`<button type="button" class="gc-rule-pick" data-r="${i}"><b>${i+1}</b><span>${escapeHtml(r.text).replace(/\n/g,'<br>')}</span></button>`).join('')
+        + (rules.some(r=>ruleSubs(r).length) ? `<label class="gc-rule-opt"><input type="checkbox" id="gr-details" checked> Inclure le détail (les règles du commandement)</label>` : '')
+        + rules.map((r,i)=>`<button type="button" class="gc-rule-pick" data-r="${i}"><b>${i+1}</b><span>${escapeHtml(r.text||'').replace(/\n/g,'<br>')}${ruleSubs(r).length ? `<small>${ruleSubs(r).map(sb=>'• '+escapeHtml(sb.text)).join('<br>')}</small>` : ''}</span></button>`).join('')
         : `<p class="emb-empty">Aucun commandement pour l'instant. Ajoutez-les dans l'onglet Commandements.</p>`}</div>
       <div class="modal-foot"><button type="button" id="gr-close" class="primary">Fermer</button></div></div>`;
     document.body.appendChild(ov);
@@ -2185,7 +2212,8 @@ function renderGroupChat(){
       if(e.target===ov){ close(); return; }
       const b = e.target.closest('[data-r]'); if(!b) return;
       const i = +b.dataset.r;
-      groupchat.messages.push({id:gcNewId(), kind:'rule', from:'me', num:i+1, text:rules[i].text, replyTo:gcReplyTo||null, ts:Date.now()});
+      const det = ov.querySelector('#gr-details'), subs = (!det || det.checked) ? ruleSubs(rules[i]).map(sb=>sb.text) : [];
+      groupchat.messages.push({id:gcNewId(), kind:'rule', from:'me', num:i+1, text:rules[i].text||'', subs, replyTo:gcReplyTo||null, ts:Date.now()});
       gcReplyTo = null; saveGC(); close();
       if(gcQuery){ gcQuery=''; qInput.value=''; searchBox.style.display='none'; }
       drawReply(); drawSenders(); drawThread(); toBottom();
@@ -2401,27 +2429,178 @@ function openPartsModal(onClose){
 }
 
 /* ================= COMMANDEMENTS ================= */
+/* un commandement = {id, text, subs:[{id, text}]} : les « subs » sont les règles plus précises qui le détaillent */
+const LS_RULES_COMPACT = 'soloemdr_rules_compact';
+function rulesCompact(){ try{ return localStorage.getItem(LS_RULES_COMPACT)==='1'; }catch(e){ return false; } }
+function ruleSubs(x){ return (Array.isArray(x.subs) ? x.subs : []).filter(sb=> sb && (sb.text||'').trim()); }
+function ruleShown(x){ return (x.text||'').trim() || ruleSubs(x).length; }
+
+/* Collage d'une liste : lignes « 1. … » ou sans puce = commandements ; puces ou lignes indentées = règles du commandement précédent.
+   Sans aucun titre (liste de puces seulement), chaque puce devient un commandement. */
+function parseRulesList(text){
+  const raw = text.split(/\r?\n/).filter(l=> l.trim());
+  const bullet = /^\s*([*•\-–]\s*)+(?=\S)/, numbered = /^\s*(\d+|[a-zA-Z])[.)]\s+/;
+  const clean = l=> l.trim().replace(bullet,'').replace(numbered,'').trim();
+  const hasHeader = raw.some(l=> !bullet.test(l) && !/^\s{2,}|^\t/.test(l));
+  const out = [];
+  raw.forEach(l=>{
+    const indented = /^\s{2,}|^\t/.test(l), isBullet = bullet.test(l);
+    const cur = out[out.length-1];
+    if(cur && (indented || (isBullet && hasHeader))) cur.subs.push(clean(l));
+    else if(isBullet && !hasHeader) out.push({text:clean(l), subs:[]});
+    else if(!isBullet && !indented) out.push({text:clean(l), subs:[]});
+    else out.push({text:clean(l), subs:[]});
+  });
+  return out.filter(x=> x.text || x.subs.length);
+}
+
 function renderRules(){
   const s = stageBase();
   s.className = 'select-view';
   const canEdit = !!vault.userId; /* modifier seulement connectée : une liste éditée hors ligne serait écrasée à la reconnexion */
-  const shown = rulesItems.filter(x=> x.text.trim());
+  const shown = rulesItems.filter(ruleShown);
+  const compact = rulesCompact();
+  const hasSubs = shown.some(x=> ruleSubs(x).length);
   s.innerHTML = `
-    ${canEdit ? '<button class="pill-btn emb-edit-btn" id="rules-edit">Modifier</button>' : ''}
+    <div class="rules-bar">
+      ${hasSubs ? `<button class="pill-btn" id="rules-view">${compact ? 'Vue détaillée' : 'Vue simplifiée'}</button>` : ''}
+      ${canEdit ? '<button class="pill-btn emb-edit-btn" id="rules-edit">Modifier</button>' : ''}
+    </div>
     <h2 class="instruction fs">Commandements</h2>
     <div class="sel-scroll">
-      ${shown.length ? `<ol class="rules-list fs" style="animation-delay:.3s;">${shown.map(x=> `<li><span>${escapeHtml(x.text).replace(/\n/g,'<br>')}</span></li>`).join('')}</ol>`
-        : `<div class="sel-list fs" style="animation-delay:.3s; width:min(680px,92%);"><p class="sub">${canEdit ? 'Aucun commandement pour l\u2019instant. Ajoutez-les avec « Modifier » (vous pouvez aussi coller toute une liste).' : 'Connectez-vous pour ajouter ou modifier vos commandements.'}</p></div>`}
+      ${shown.length ? `<ol class="rules-list fs" style="animation-delay:.3s;">${shown.map(x=>{
+          const subs = ruleSubs(x);
+          return `<li><div class="rule-body"><span>${escapeHtml(x.text||'').replace(/\n/g,'<br>')}</span>`
+            + (!compact && subs.length ? `<ul class="rule-subs">${subs.map(sb=> `<li>${escapeHtml(sb.text).replace(/\n/g,'<br>')}</li>`).join('')}</ul>` : '')
+            + `</div></li>`; }).join('')}</ol>`
+        : `<div class="sel-list fs" style="animation-delay:.3s; width:min(680px,92%);"><p class="sub">${canEdit ? 'Aucun commandement pour l’instant. Ajoutez-les avec « Modifier » (vous pouvez aussi coller toute une liste).' : 'Connectez-vous pour ajouter ou modifier vos commandements.'}</p></div>`}
     </div>`;
   document.body.classList.add('hide-l','hide-r');
   const edit = s.querySelector('#rules-edit');
-  if(edit) edit.addEventListener('click', ()=> openListModal({
-    title:'Modifier les commandements', add:'+ Ajouter un commandement', empty:'Aucun commandement. Ajoutez-en un ou collez une liste.',
-    paste:'Collez ici votre liste : une ligne par commandement, ou des puces (* ou -)', addBtn:'Ajouter ces commandements',
-    get:()=> rulesItems, save:(l)=>{ rulesItems = l; saveRules(rulesItems); }, newId:newEmbodimentId
-  }, ()=> renderRules()));
+  if(edit) edit.addEventListener('click', ()=> openRulesModal(()=> renderRules()));
+  const view = s.querySelector('#rules-view');
+  if(view) view.addEventListener('click', ()=>{ try{ localStorage.setItem(LS_RULES_COMPACT, compact ? '0' : '1'); }catch(e){} renderRules(); });
   /* au chargement de la page, la connexion se rétablit en arrière-plan : on réaffiche alors le bouton */
   if(!vaultRestoreDone) vaultRestorePromise.then(()=>{ if(currentPhase==='rules') renderRules(); });
+}
+
+function openRulesModal(onClose){
+  let items = rulesItems;
+  items.forEach(x=>{ if(!Array.isArray(x.subs)) x.subs = []; });
+  const commit = ()=> saveRules(items);
+  const overlay = document.createElement('div'); overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-panel" role="dialog" aria-label="Modifier les commandements">
+      <div class="modal-head"><h3>Modifier les commandements</h3></div>
+      <div class="modal-body" id="rl-list"></div>
+      <div class="modal-import" id="rl-import" style="display:none;">
+        <textarea id="rl-import-text" placeholder="Collez ici votre liste : « 1. Commandement » puis ses règles en puces (* ou -) ou en retrait"></textarea>
+        <button type="button" id="rl-import-go">Ajouter ces commandements</button>
+      </div>
+      <div class="modal-foot">
+        <button type="button" id="rl-add">+ Ajouter un commandement</button>
+        <button type="button" id="rl-paste">Coller une liste</button>
+        <button type="button" id="rl-done" class="primary">Terminer</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const listEl = overlay.querySelector('#rl-list');
+  const auto = t=>{ t.style.height='auto'; t.style.height = t.scrollHeight+'px'; };
+  const arm = (b, label)=>{
+    if(b.classList.contains('armed')) return true;
+    b.classList.add('armed'); b.dataset.old = b.textContent; b.textContent = label;
+    setTimeout(()=>{ if(b.isConnected){ b.classList.remove('armed'); b.textContent = b.dataset.old; } }, 3000);
+    return false;
+  };
+  function draw(focusSel){
+    if(!items.length){ listEl.innerHTML = '<p class="emb-empty">Aucun commandement. Ajoutez-en un ou collez une liste.</p>'; return; }
+    listEl.innerHTML = items.map((it,i)=>`
+      <div class="rl-card" data-id="${it.id}">
+        <div class="emb-row">
+          <span class="rl-num">${i+1}.</span>
+          <textarea data-t="${it.id}" rows="1" placeholder="Commandement">${escapeHtml(it.text||'')}</textarea>
+          <div class="emb-row-actions">
+            <button type="button" data-up="${it.id}" title="Monter" ${i===0?'disabled':''}>↑</button>
+            <button type="button" data-down="${it.id}" title="Descendre" ${i===items.length-1?'disabled':''}>↓</button>
+            <button type="button" data-del="${it.id}" title="Supprimer">✕</button>
+          </div>
+        </div>
+        <div class="rl-subs">
+          ${it.subs.map((sb,j)=>`
+            <div class="rl-sub">
+              <span class="rl-dot">•</span>
+              <textarea data-st="${it.id}|${sb.id}" rows="1" placeholder="Règle">${escapeHtml(sb.text||'')}</textarea>
+              <div class="rl-sub-actions">
+                <button type="button" data-supx="${it.id}|${sb.id}" title="Monter" ${j===0?'disabled':''}>↑</button>
+                <button type="button" data-sdown="${it.id}|${sb.id}" title="Descendre" ${j===it.subs.length-1?'disabled':''}>↓</button>
+                <button type="button" data-sdel="${it.id}|${sb.id}" title="Supprimer">✕</button>
+              </div>
+            </div>`).join('')}
+          <button type="button" class="rl-addsub" data-addsub="${it.id}">+ Ajouter une règle</button>
+        </div>
+      </div>`).join('');
+    listEl.querySelectorAll('textarea').forEach(auto);
+    if(focusSel){ const t = listEl.querySelector(focusSel); if(t){ t.focus(); t.scrollIntoView({block:'nearest'}); } }
+  }
+  draw();
+  const byId = id=> items.find(x=>x.id===id);
+  listEl.addEventListener('input', e=>{
+    const t = e.target; if(t.tagName!=='TEXTAREA') return;
+    if(t.dataset.t){ const it = byId(t.dataset.t); if(it){ it.text = t.value; commit(); } }
+    else if(t.dataset.st){ const [iid,sid] = t.dataset.st.split('|'); const it = byId(iid), sb = it && it.subs.find(x=>x.id===sid); if(sb){ sb.text = t.value; commit(); } }
+    auto(t);
+  });
+  listEl.addEventListener('click', e=>{
+    const t = e.target;
+    const mv = (arr,id,dir)=>{ const i = arr.findIndex(x=>x.id===id), j = i+dir; if(i<0||j<0||j>=arr.length) return false; [arr[i],arr[j]] = [arr[j],arr[i]]; return true; };
+    let b;
+    if((b = t.closest('[data-up]'))){ if(mv(items,b.dataset.up,-1)){ commit(); draw(); } return; }
+    if((b = t.closest('[data-down]'))){ if(mv(items,b.dataset.down,1)){ commit(); draw(); } return; }
+    if((b = t.closest('[data-del]'))){
+      const it = byId(b.dataset.del);
+      if(!arm(b, it && it.subs.length ? 'Supprimer ? (et ses règles)' : 'Supprimer ?')) return;
+      items = items.filter(x=>x.id!==b.dataset.del); rulesItems = items; commit(); draw(); return;
+    }
+    if((b = t.closest('[data-addsub]'))){
+      const it = byId(b.dataset.addsub); if(!it) return;
+      const sb = {id:newEmbodimentId(), text:''}; it.subs.push(sb); commit(); draw(`[data-st="${it.id}|${sb.id}"]`); return;
+    }
+    if((b = t.closest('[data-supx]'))){ const [iid,sid] = b.dataset.supx.split('|'); const it = byId(iid); if(it && mv(it.subs,sid,-1)){ commit(); draw(); } return; }
+    if((b = t.closest('[data-sdown]'))){ const [iid,sid] = b.dataset.sdown.split('|'); const it = byId(iid); if(it && mv(it.subs,sid,1)){ commit(); draw(); } return; }
+    if((b = t.closest('[data-sdel]'))){
+      if(!arm(b,'Supprimer ?')) return;
+      const [iid,sid] = b.dataset.sdel.split('|'); const it = byId(iid); if(it){ it.subs = it.subs.filter(x=>x.id!==sid); commit(); draw(); } return;
+    }
+  });
+  const close = ()=>{
+    items.forEach(it=>{ it.subs = it.subs.filter(sb=> (sb.text||'').trim()); });
+    items = items.filter(it=> (it.text||'').trim() || it.subs.length);
+    items.forEach(it=>{ if(!(it.text||'').trim()) it.text = 'Sans titre'; });
+    rulesItems = items; commit();
+    overlay.remove();
+    if(onClose) onClose();
+  };
+  /* le clavier ne doit pas piloter l'écran en dessous (Entrée = écran suivant, etc.) */
+  overlay.addEventListener('keydown', e=>{ e.stopPropagation(); if(e.key==='Escape') close(); });
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) close(); });
+  overlay.querySelector('#rl-done').addEventListener('click', close);
+  overlay.querySelector('#rl-add').addEventListener('click', ()=>{
+    const it = {id:newEmbodimentId(), text:'', subs:[]}; items.push(it); commit(); draw(`[data-t="${it.id}"]`);
+    listEl.scrollTop = listEl.scrollHeight;
+  });
+  const importBox = overlay.querySelector('#rl-import');
+  overlay.querySelector('#rl-paste').addEventListener('click', ()=>{
+    importBox.style.display = importBox.style.display==='none' ? 'flex' : 'none';
+    if(importBox.style.display==='flex') overlay.querySelector('#rl-import-text').focus();
+  });
+  overlay.querySelector('#rl-import-go').addEventListener('click', ()=>{
+    const ta = overlay.querySelector('#rl-import-text');
+    const parsed = parseRulesList(ta.value);
+    if(!parsed.length) return;
+    parsed.forEach(p=> items.push({id:newEmbodimentId(), text:p.text, subs:p.subs.map(t=>({id:newEmbodimentId(), text:t}))}));
+    commit(); ta.value = ''; importBox.style.display = 'none'; draw();
+    listEl.scrollTop = listEl.scrollHeight;
+  });
 }
 
 /* ================= SOS ================= */

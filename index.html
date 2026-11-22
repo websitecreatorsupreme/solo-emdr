@@ -394,7 +394,12 @@
   .rules-list{ width:min(680px,92%); margin-top:14px; padding:0 0 24px; list-style:none; counter-reset:rule; text-align:left; display:flex; flex-direction:column; gap:16px; }
   .rules-bar{ position:absolute; top:18px; right:64px; display:flex; gap:8px; z-index:2; }
   .rules-bar .emb-edit-btn{ position:static; }
-  .rule-body{ display:flex; flex-direction:column; gap:6px; flex:1; }
+  .rule-body{ display:flex; flex-direction:column; flex:1; }
+  /* repli/dépli fluide : la hauteur passe de 0fr à 1fr (sans recalcul de hauteur en JS) */
+  .rule-subs-wrap{ display:grid; grid-template-rows:1fr; opacity:1; padding-top:6px; transition:grid-template-rows .38s cubic-bezier(.4,0,.2,1), opacity .3s ease, padding-top .38s cubic-bezier(.4,0,.2,1), visibility 0s; }
+  .rules-list.compact .rule-subs-wrap{ grid-template-rows:0fr; opacity:0; padding-top:0; visibility:hidden; transition:grid-template-rows .38s cubic-bezier(.4,0,.2,1), opacity .22s ease, padding-top .38s cubic-bezier(.4,0,.2,1), visibility 0s .38s; }
+  .rule-subs-wrap > .rule-subs{ min-height:0; overflow:hidden; }
+  @media (prefers-reduced-motion:reduce){ .rule-subs-wrap, .rules-list.compact .rule-subs-wrap{ transition:none; } }
   .rule-subs{ margin:0; padding:0 0 0 1.1em; list-style:disc; color:var(--ink-soft); font-size:14px; line-height:1.55; display:flex; flex-direction:column; gap:3px; }
   .rules-list .rule-subs li{ display:list-item; counter-increment:none; font-size:14px; gap:0; }
   .rules-list .rule-subs li::before{ content:none; }
@@ -2468,10 +2473,10 @@ function renderRules(){
     </div>
     <h2 class="instruction fs">Commandements</h2>
     <div class="sel-scroll">
-      ${shown.length ? `<ol class="rules-list fs" style="animation-delay:.3s;">${shown.map(x=>{
+      ${shown.length ? `<ol class="rules-list fs${compact?' compact':''}" style="animation-delay:.3s;">${shown.map(x=>{
           const subs = ruleSubs(x);
           return `<li><div class="rule-body"><span>${escapeHtml(x.text||'').replace(/\n/g,'<br>')}</span>`
-            + (!compact && subs.length ? `<ul class="rule-subs">${subs.map(sb=> `<li>${escapeHtml(sb.text).replace(/\n/g,'<br>')}</li>`).join('')}</ul>` : '')
+            + (subs.length ? `<div class="rule-subs-wrap"><ul class="rule-subs">${subs.map(sb=> `<li>${escapeHtml(sb.text).replace(/\n/g,'<br>')}</li>`).join('')}</ul></div>` : '')
             + `</div></li>`; }).join('')}</ol>`
         : `<div class="sel-list fs" style="animation-delay:.3s; width:min(680px,92%);"><p class="sub">${canEdit ? 'Aucun commandement pour l’instant. Ajoutez-les avec « Modifier » (vous pouvez aussi coller toute une liste).' : 'Connectez-vous pour ajouter ou modifier vos commandements.'}</p></div>`}
     </div>`;
@@ -2479,7 +2484,14 @@ function renderRules(){
   const edit = s.querySelector('#rules-edit');
   if(edit) edit.addEventListener('click', ()=> openRulesModal(()=> renderRules()));
   const view = s.querySelector('#rules-view');
-  if(view) view.addEventListener('click', ()=>{ try{ localStorage.setItem(LS_RULES_COMPACT, compact ? '0' : '1'); }catch(e){} renderRules(); });
+  /* bascule sur place (sans réafficher la page) pour que le repli/dépli s'anime */
+  if(view) view.addEventListener('click', ()=>{
+    const list = s.querySelector('.rules-list');
+    const nowCompact = !(list && list.classList.contains('compact'));
+    try{ localStorage.setItem(LS_RULES_COMPACT, nowCompact ? '1' : '0'); }catch(e){}
+    if(list) list.classList.toggle('compact', nowCompact);
+    view.textContent = nowCompact ? 'Vue détaillée' : 'Vue simplifiée';
+  });
   /* au chargement de la page, la connexion se rétablit en arrière-plan : on réaffiche alors le bouton */
   if(!vaultRestoreDone) vaultRestorePromise.then(()=>{ if(currentPhase==='rules') renderRules(); });
 }

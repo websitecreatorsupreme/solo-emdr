@@ -402,9 +402,6 @@
   .rule-head.has-subs{ cursor:pointer; border-radius:8px; margin:-3px -6px; padding:3px 6px; transition:background .15s ease; -webkit-tap-highlight-color:transparent; }
   .rule-head.has-subs:hover{ background:rgba(127,127,127,.09); }
   .rule-head.has-subs:focus-visible{ outline:2px solid var(--teal); outline-offset:1px; }
-  .rule-chev{ flex:0 0 auto; color:var(--ink-soft); font-size:15px; line-height:1; transform:rotate(90deg); transition:transform .38s cubic-bezier(.4,0,.2,1); }
-  .rules-list li.collapsed .rule-chev{ transform:rotate(0deg); }
-  @media (prefers-reduced-motion:reduce){ .rule-chev{ transition:none; } }
   .rule-subs-wrap > .rule-subs{ min-height:0; overflow:hidden; }
   @media (prefers-reduced-motion:reduce){ .rule-subs-wrap, .rules-list li.collapsed .rule-subs-wrap{ transition:none; } }
   .rule-subs{ margin:0; padding:0 0 0 1.1em; list-style:disc; color:var(--ink-soft); font-size:14px; line-height:1.55; display:flex; flex-direction:column; gap:3px; }
@@ -474,6 +471,26 @@
     border:1px solid rgba(239,232,218,0.3); color:#EFE8DA; border-radius:20px; padding:8px 16px; font-size:13px; cursor:pointer; font-family:var(--font-body); }
 
   .form-error{ color:#E8908A; font-size:12.5px; margin-top:10px; min-height:16px; max-width:420px; }
+  /* ===== téléphone : la barre d'onglets (fixe, en haut) ne doit jamais chevaucher le contenu ===== */
+  @media (max-width:640px){
+    #stage{ padding:68px 20px 28px; }
+    #stage.select-view{ padding-top:68px; }
+    .dark-form{ padding:68px 20px 28px; }
+    /* boutons « Modifier » / « Vue simplifiée » : sous la barre d'onglets, plus sur la même ligne */
+    .rules-bar, .emb-edit-btn{ top:60px; right:16px; }
+    .rules-bar .emb-edit-btn{ top:auto; right:auto; }
+    #stage .rules-bar + h2.instruction, #stage .emb-edit-btn + h2.instruction{ margin-top:46px; }
+  }
+  @media (max-width:420px){
+    /* onglets resserrés pour que musique/réglages ne passent pas sous l'icône du compte */
+    #homeIcon{ left:8px; } #libraryIcon{ left:44px; } #embodimentIcon{ left:80px; } #sosIcon{ left:116px; } #rulesIcon{ left:152px; } #groupchatIcon{ left:188px; }
+    #recentLibraryIcon{ left:224px; }
+    #settingsIcon{ left:272px; } #barDivider{ left:261px; } #musicIcon{ left:308px; }
+    body.no-rtep #settingsIcon{ left:236px; } body.no-rtep #barDivider{ left:225px; } body.no-rtep #musicIcon{ left:272px; }
+    .account-wrap{ right:8px; }
+    /* panneaux : pleine largeur, calés sous la barre */
+    #settings-panel, body.no-rtep #settings-panel, #music-panel{ left:12px; right:12px; width:auto; max-width:none; }
+  }
 </style>
 </head>
 <body>
@@ -2482,7 +2499,7 @@ function renderRules(){
     <div class="sel-scroll">
       ${shown.length ? `<ol class="rules-list fs" style="animation-delay:.3s;">${shown.map(x=>{
           const subs = ruleSubs(x);
-          return `<li${subs.length && compact ? ' class="collapsed"' : ''}><div class="rule-body"><div class="rule-head${subs.length?' has-subs':''}"${subs.length ? ` role="button" tabindex="0" aria-expanded="${compact?'false':'true'}"` : ''}><span>${escapeHtml(x.text||'').replace(/\n/g,'<br>')}</span>${subs.length ? '<span class="rule-chev" aria-hidden="true">›</span>' : ''}</div>`
+          return `<li${subs.length && compact ? ' class="collapsed"' : ''}><div class="rule-body"><div class="rule-head${subs.length?' has-subs':''}"${subs.length ? ` role="button" tabindex="0" aria-expanded="${compact?'false':'true'}"` : ''}><span>${escapeHtml(x.text||'').replace(/\n/g,'<br>')}</span></div>`
             + (subs.length ? `<div class="rule-subs-wrap"><ul class="rule-subs">${subs.map(sb=> `<li>${escapeHtml(sb.text).replace(/\n/g,'<br>')}</li>`).join('')}</ul></div>` : '')
             + `</div></li>`; }).join('')}</ol>`
         : `<div class="sel-list fs" style="animation-delay:.3s; width:min(680px,92%);"><p class="sub">${canEdit ? 'Aucun commandement pour l’instant. Ajoutez-les avec « Modifier » (vous pouvez aussi coller toute une liste).' : 'Connectez-vous pour ajouter ou modifier vos commandements.'}</p></div>`}

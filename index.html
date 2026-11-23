@@ -397,9 +397,16 @@
   .rule-body{ display:flex; flex-direction:column; flex:1; }
   /* repli/dépli fluide : la hauteur passe de 0fr à 1fr (sans recalcul de hauteur en JS) */
   .rule-subs-wrap{ display:grid; grid-template-rows:1fr; opacity:1; padding-top:6px; transition:grid-template-rows .38s cubic-bezier(.4,0,.2,1), opacity .3s ease, padding-top .38s cubic-bezier(.4,0,.2,1), visibility 0s; }
-  .rules-list.compact .rule-subs-wrap{ grid-template-rows:0fr; opacity:0; padding-top:0; visibility:hidden; transition:grid-template-rows .38s cubic-bezier(.4,0,.2,1), opacity .22s ease, padding-top .38s cubic-bezier(.4,0,.2,1), visibility 0s .38s; }
+  .rules-list li.collapsed .rule-subs-wrap{ grid-template-rows:0fr; opacity:0; padding-top:0; visibility:hidden; transition:grid-template-rows .38s cubic-bezier(.4,0,.2,1), opacity .22s ease, padding-top .38s cubic-bezier(.4,0,.2,1), visibility 0s .38s; }
+  .rule-head{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
+  .rule-head.has-subs{ cursor:pointer; border-radius:8px; margin:-3px -6px; padding:3px 6px; transition:background .15s ease; -webkit-tap-highlight-color:transparent; }
+  .rule-head.has-subs:hover{ background:rgba(127,127,127,.09); }
+  .rule-head.has-subs:focus-visible{ outline:2px solid var(--teal); outline-offset:1px; }
+  .rule-chev{ flex:0 0 auto; color:var(--ink-soft); font-size:15px; line-height:1; transform:rotate(90deg); transition:transform .38s cubic-bezier(.4,0,.2,1); }
+  .rules-list li.collapsed .rule-chev{ transform:rotate(0deg); }
+  @media (prefers-reduced-motion:reduce){ .rule-chev{ transition:none; } }
   .rule-subs-wrap > .rule-subs{ min-height:0; overflow:hidden; }
-  @media (prefers-reduced-motion:reduce){ .rule-subs-wrap, .rules-list.compact .rule-subs-wrap{ transition:none; } }
+  @media (prefers-reduced-motion:reduce){ .rule-subs-wrap, .rules-list li.collapsed .rule-subs-wrap{ transition:none; } }
   .rule-subs{ margin:0; padding:0 0 0 1.1em; list-style:disc; color:var(--ink-soft); font-size:14px; line-height:1.55; display:flex; flex-direction:column; gap:3px; }
   .rules-list .rule-subs li{ display:list-item; counter-increment:none; font-size:14px; gap:0; }
   .rules-list .rule-subs li::before{ content:none; }
@@ -2473,9 +2480,9 @@ function renderRules(){
     </div>
     <h2 class="instruction fs">Commandements</h2>
     <div class="sel-scroll">
-      ${shown.length ? `<ol class="rules-list fs${compact?' compact':''}" style="animation-delay:.3s;">${shown.map(x=>{
+      ${shown.length ? `<ol class="rules-list fs" style="animation-delay:.3s;">${shown.map(x=>{
           const subs = ruleSubs(x);
-          return `<li><div class="rule-body"><span>${escapeHtml(x.text||'').replace(/\n/g,'<br>')}</span>`
+          return `<li${subs.length && compact ? ' class="collapsed"' : ''}><div class="rule-body"><div class="rule-head${subs.length?' has-subs':''}"${subs.length ? ` role="button" tabindex="0" aria-expanded="${compact?'false':'true'}"` : ''}><span>${escapeHtml(x.text||'').replace(/\n/g,'<br>')}</span>${subs.length ? '<span class="rule-chev" aria-hidden="true">›</span>' : ''}</div>`
             + (subs.length ? `<div class="rule-subs-wrap"><ul class="rule-subs">${subs.map(sb=> `<li>${escapeHtml(sb.text).replace(/\n/g,'<br>')}</li>`).join('')}</ul></div>` : '')
             + `</div></li>`; }).join('')}</ol>`
         : `<div class="sel-list fs" style="animation-delay:.3s; width:min(680px,92%);"><p class="sub">${canEdit ? 'Aucun commandement pour l’instant. Ajoutez-les avec « Modifier » (vous pouvez aussi coller toute une liste).' : 'Connectez-vous pour ajouter ou modifier vos commandements.'}</p></div>`}
@@ -2484,13 +2491,20 @@ function renderRules(){
   const edit = s.querySelector('#rules-edit');
   if(edit) edit.addEventListener('click', ()=> openRulesModal(()=> renderRules()));
   const view = s.querySelector('#rules-view');
-  /* bascule sur place (sans réafficher la page) pour que le repli/dépli s'anime */
+  /* bascules sur place (sans réafficher la page) pour que le repli/dépli s'anime */
+  const heads = [...s.querySelectorAll('.rule-head.has-subs')];
+  const liOf = h=> h.parentNode.parentNode;
+  const syncBtn = ()=>{ if(view) view.textContent = heads.every(h=> liOf(h).classList.contains('collapsed')) ? 'Vue détaillée' : 'Vue simplifiée'; };
+  const setOpen = (h, open)=>{ liOf(h).classList.toggle('collapsed', !open); h.setAttribute('aria-expanded', open ? 'true' : 'false'); };
+  heads.forEach(h=>{
+    h.addEventListener('click', ()=>{ setOpen(h, liOf(h).classList.contains('collapsed')); syncBtn(); });
+    h.addEventListener('keydown', e=>{ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); e.stopPropagation(); h.click(); } });
+  });
   if(view) view.addEventListener('click', ()=>{
-    const list = s.querySelector('.rules-list');
-    const nowCompact = !(list && list.classList.contains('compact'));
-    try{ localStorage.setItem(LS_RULES_COMPACT, nowCompact ? '1' : '0'); }catch(e){}
-    if(list) list.classList.toggle('compact', nowCompact);
-    view.textContent = nowCompact ? 'Vue détaillée' : 'Vue simplifiée';
+    const toCompact = !heads.every(h=> liOf(h).classList.contains('collapsed'));
+    try{ localStorage.setItem(LS_RULES_COMPACT, toCompact ? '1' : '0'); }catch(e){}
+    heads.forEach(h=> setOpen(h, !toCompact));
+    syncBtn();
   });
   /* au chargement de la page, la connexion se rétablit en arrière-plan : on réaffiche alors le bouton */
   if(!vaultRestoreDone) vaultRestorePromise.then(()=>{ if(currentPhase==='rules') renderRules(); });

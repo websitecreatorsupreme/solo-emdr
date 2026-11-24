@@ -61,6 +61,37 @@ const SUPABASE_ANON_KEY = 'SUPABASE_ANON_KEY_HERE';
 
 Remplace par tes vraies valeurs récupérées à l'étape 1, sauvegarde, et redéploie (commit + push). La synchronisation s'active automatiquement dès que ces deux valeurs sont renseignées.
 
+## 5. (Optionnel) Pistes audio synchronisées — onglet Commandements
+
+Pour que les pistes audio des commandements suivent ton compte d'un appareil à l'autre, il faut un espace de stockage privé. Dans **SQL Editor**, exécute une seule fois :
+
+```sql
+insert into storage.buckets (id, name, public)
+values ('audio', 'audio', false)
+on conflict (id) do nothing;
+
+create policy "audio select own" on storage.objects
+  for select to authenticated
+  using (bucket_id = 'audio' and (storage.foldername(name))[1] = auth.uid()::text);
+
+create policy "audio insert own" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'audio' and (storage.foldername(name))[1] = auth.uid()::text);
+
+create policy "audio update own" on storage.objects
+  for update to authenticated
+  using (bucket_id = 'audio' and (storage.foldername(name))[1] = auth.uid()::text)
+  with check (bucket_id = 'audio' and (storage.foldername(name))[1] = auth.uid()::text);
+
+create policy "audio delete own" on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'audio' and (storage.foldername(name))[1] = auth.uid()::text);
+```
+
+Chaque fichier est **chiffré dans ton navigateur** (avec la même clé que le coffre) avant l'envoi : Supabase ne stocke que des octets illisibles, rangés dans un dossier à ton identifiant. Taille maximale : 45 Mo par piste (la limite du stockage gratuit est de 50 Mo).
+
+Sans cette étape, les pistes restent utilisables mais uniquement sur l'appareil où elles ont été ajoutées.
+
 ## Comment ça marche
 
 - **Créer un compte** (icône réglages > Compte & synchronisation) génère une clé de chiffrement unique, l'enveloppe une fois avec ton mot de passe et une fois avec une **phrase de récupération** affichée une seule fois — à noter en lieu sûr.

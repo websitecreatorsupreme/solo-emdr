@@ -407,6 +407,20 @@
   .rule-subs{ margin:0; padding:0 0 0 1.1em; list-style:disc; color:var(--ink-soft); font-size:14px; line-height:1.55; display:flex; flex-direction:column; gap:3px; }
   .rules-list .rule-subs li{ display:list-item; counter-increment:none; font-size:14px; gap:0; }
   .rules-list .rule-subs li::before{ content:none; }
+  .ra-box{ width:min(680px,92%); margin:4px 0 6px; }
+  .ra-rows{ display:flex; flex-direction:column; gap:8px; }
+  .ra-row{ display:flex; align-items:center; gap:10px; border:1px solid var(--line); background:var(--surface); border-radius:12px; padding:8px 10px; text-align:left; }
+  .ra-play{ flex:0 0 auto; width:38px; height:38px; border-radius:50%; border:1px solid var(--teal); background:none; color:var(--teal); font-size:13px; cursor:pointer; padding:0; }
+  .ra-play:disabled{ opacity:.35; cursor:default; }
+  .ra-main{ flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+  .ra-label{ font-size:14px; }
+  .ra-name{ font-size:12px; color:var(--ink-soft); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ra-seekrow{ display:flex; align-items:center; gap:8px; margin-top:4px; }
+  .ra-seek{ flex:1; min-width:0; }
+  .ra-time{ font-size:11.5px; color:var(--ink-soft); font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .ra-btn{ flex:0 0 auto; font-size:12px; padding:6px 10px; border-radius:8px; border:1px solid var(--line); background:var(--bg-soft); color:var(--ink); cursor:pointer; }
+  .ra-btn:disabled{ opacity:.4; cursor:default; } .ra-btn.armed{ border-color:#C0554A; color:#E8908A; }
+  .ra-note{ margin:2px 2px 0; font-size:12px; color:var(--ink-soft); text-align:left; }
   .rl-card{ border:1px solid var(--line); border-radius:12px; padding:10px; display:flex; flex-direction:column; gap:8px; }
   .rl-num{ font-family:var(--font-display); color:var(--teal); padding-top:8px; min-width:1.6em; text-align:right; }
   .rl-subs{ margin-left:2em; display:flex; flex-direction:column; gap:6px; }
@@ -590,6 +604,27 @@ const LS_RULES = 'soloemdr_commandments';
 function loadRules(){ try{ const a = JSON.parse(localStorage.getItem(LS_RULES)); return Array.isArray(a) ? a : []; }catch(e){ return []; } }
 function saveRules(list){ localStorage.setItem(LS_RULES, JSON.stringify(list)); scheduleSync(); }
 let rulesItems = loadRules();
+/* Pistes audio des commandements : une pour la vue simplifiée, une pour la vue détaillée.
+   Métadonnées {rev,name,size,type,cloud} dans le coffre ; le fichier lui-même est chiffré (même clé que le coffre)
+   puis envoyé dans le stockage du compte (bucket « audio ») et mis en cache sur chaque appareil (IndexedDB).
+   Un emplacement retiré est gardé comme {rev, removed:true} pour que la suppression se propage. */
+const LS_RULES_AUDIO = 'soloemdr_rules_audio';
+function raNormalize(o){
+  const ok = x=> (x && typeof x==='object' && typeof x.rev==='number') ? x : null;
+  return {compact: ok(o && o.compact), detailed: ok(o && o.detailed)};
+}
+function loadRulesAudio(){ try{ return raNormalize(JSON.parse(localStorage.getItem(LS_RULES_AUDIO))); }catch(e){ return raNormalize(null); } }
+let rulesAudio = loadRulesAudio();
+function raPersist(sync){ try{ localStorage.setItem(LS_RULES_AUDIO, JSON.stringify(rulesAudio)); }catch(e){} if(sync) scheduleSync(); }
+/* fusion : pour chaque emplacement, la version la plus récente gagne ; à égalité, celle déjà envoyée au compte */
+function mergeRulesAudio(c){
+  const n = raNormalize(c);
+  ['compact','detailed'].forEach(k=>{
+    const a = rulesAudio[k], b = n[k];
+    if(b && (!a || b.rev>a.rev || (b.rev===a.rev && b.cloud && !a.cloud))) rulesAudio[k] = b;
+  });
+  raPersist(false);
+}
 const LS_GC = 'soloemdr_groupchat';
 function gcFix(g){
   if(!g || !Array.isArray(g.parts) || !Array.isArray(g.messages)) return null;
@@ -649,6 +684,7 @@ function musicPlaying(){ return !!(music.el && music.id && !music.el.paused); }
 function musicVolume(){ return typeof settings.musicVolume==='number' ? Math.max(0, Math.min(1, settings.musicVolume)) : 0.6; }
 function updateMusicBadge(){ document.body.classList.toggle('music-on', musicPlaying()); }
 async function musicPlay(item){
+  raStop();
   const el = musicEl();
   if(music.id===item.id && el.src){ await el.play(); return; }
   const blob = await musicGet(item.id);
@@ -972,7 +1008,7 @@ window.addEventListener('pagehide', flushPendingSync);
    cet appareil n'a rien en attente, en FUSIONNANT (union par identifiant) sinon, jamais en écrasant. */
 function seenMs(){ const v = localStorage.getItem(LS_SEEN); return v ? +v : null; }
 function setSeen(iso){ try{ const t = Date.parse(iso); if(t) localStorage.setItem(LS_SEEN, String(t)); }catch(e){} }
-function currentPayloadObj(){ return {traumas, folders, settings, recentTraumas, embodiment: embodimentItems, sosAffirmations, commandments: rulesItems, groupchat}; }
+function currentPayloadObj(){ return {traumas, folders, settings, recentTraumas, embodiment: embodimentItems, sosAffirmations, commandments: rulesItems, commandmentsAudio: rulesAudio, groupchat}; }
 function mergeById(local, cloud){
   const key = x=> (x && x.id!==undefined) ? 'id:'+x.id : 'j:'+JSON.stringify(x);
   const out = Array.isArray(local) ? local.slice() : [], have = new Set(out.map(key));
@@ -989,6 +1025,7 @@ function mergeCloudInto(c){
       if(cr && Array.isArray(cr.subs)){ r.subs = mergeById(r.subs||[], cr.subs); }
     });
   }
+  if(c.commandmentsAudio) mergeRulesAudio(c.commandmentsAudio);
   if(Array.isArray(c.sosAffirmations)) sosAffirmations = sosAffirmations.concat(c.sosAffirmations.filter(x=> !sosAffirmations.includes(x)));
   const cg = gcFix(c.groupchat);
   if(cg){
@@ -1102,6 +1139,7 @@ async function vaultPull(row){
   if(Array.isArray(parsed.embodiment)){ embodimentItems = parsed.embodiment; localStorage.setItem(LS_EMBODIMENT, JSON.stringify(embodimentItems)); }
   if(parsed.groupchat && Array.isArray(parsed.groupchat.parts) && Array.isArray(parsed.groupchat.messages)){ groupchat = gcFix(parsed.groupchat); localStorage.setItem(LS_GC, JSON.stringify(groupchat)); }
   if(Array.isArray(parsed.commandments)){ rulesItems = parsed.commandments; localStorage.setItem(LS_RULES, JSON.stringify(rulesItems)); }
+  if(parsed.commandmentsAudio){ rulesAudio = raNormalize(parsed.commandmentsAudio); raPersist(false); }
   if(Array.isArray(parsed.sosAffirmations)){ sosAffirmations = parsed.sosAffirmations; localStorage.setItem(LS_SOS_AFF, JSON.stringify(sosAffirmations)); }
   settings = Object.assign(settings, parsed.settings||{});
   if(row.updated_at) setSeen(row.updated_at);
@@ -1124,7 +1162,7 @@ async function ensureVaultCreated(userId, email, password){
   const kekRec = await deriveKekFromPassphrase(normalizeRecoveryPhrase(recoveryPhrase), saltRec);
   const wrapPw = await wrapDEK(dek, kekPw);
   const wrapRec = await wrapDEK(dek, kekRec);
-  const payload = JSON.stringify({traumas, folders, settings, recentTraumas, embodiment: embodimentItems, sosAffirmations, commandments: rulesItems, groupchat});
+  const payload = JSON.stringify({traumas, folders, settings, recentTraumas, embodiment: embodimentItems, sosAffirmations, commandments: rulesItems, commandmentsAudio: rulesAudio, groupchat});
   const {ivB64, ctB64} = await encryptWithDEK(dek, payload);
   const newRow = { user_id:userId, salt_pw:saltPw, iv_pw:wrapPw.ivB64, wrapped_dek_pw:wrapPw.wrappedB64,
     salt_rec:saltRec, iv_rec:wrapRec.ivB64, wrapped_dek_rec:wrapRec.wrappedB64, data_iv:ivB64, ciphertext:ctB64 };
@@ -1178,6 +1216,7 @@ async function vaultLogout(){
   await clearSessionDEK();
   traumas = []; folders = []; recentTraumas = []; embodimentItems = []; sosAffirmations = []; rulesItems = []; groupchat = {parts:[], messages:[]};
   localStorage.removeItem(LS_RULES);
+  raWipeLocal();
   localStorage.removeItem(LS_GC);
   localStorage.removeItem(LS_SEEN); localStorage.removeItem(LS_DIRTY);
   localStorage.removeItem(LS_EMBODIMENT);
@@ -2457,6 +2496,193 @@ function openPartsModal(onClose){
   ov.querySelector('#gp-done').addEventListener('click', close);
 }
 
+/* ---- pistes audio des commandements ---- */
+const RA_SLOTS = [['compact','Version simplifiée'], ['detailed','Version détaillée']];
+const RA_BUCKET = 'audio', RA_MAX = 45*1024*1024; /* la limite par fichier du stockage gratuit est de 50 Mo */
+const ra = {have:{}, busy:{}, note:'', rows:null, input:null, dragging:false, running:false};
+const raPlayer = {el:null, key:null, rev:null, url:null};
+const raLive = k=>{ const x = rulesAudio[k]; return x && !x.removed ? x : null; };
+const raId = (k, x)=> 'rules_'+k+'_'+x.rev;
+const raPath = (k, x)=> vault.userId+'/rules-'+k+'-'+x.rev;
+function raErrMsg(e){
+  const m = String((e && (e.message || e.error || e.code)) || e || '');
+  return /bucket|not found|row-level|polic|40[134]|invalid/i.test(m)
+    ? 'L’envoi vers ton compte n’est pas encore activé : il manque une étape de configuration dans Supabase (voir SUPABASE_SETUP.md, étape 5).'
+    : 'Envoi impossible pour le moment ('+m.slice(0,80)+'). Il sera retenté.';
+}
+async function raEncrypt(blob){
+  const iv = randBytes(12);
+  const ct = await crypto.subtle.encrypt({name:'AES-GCM', iv}, vault.dek, await blob.arrayBuffer());
+  return new Blob([iv, ct], {type:'application/octet-stream'});
+}
+async function raDecrypt(buf, type){
+  const u = new Uint8Array(buf);
+  const pt = await crypto.subtle.decrypt({name:'AES-GCM', iv:u.subarray(0,12)}, vault.dek, u.subarray(12));
+  return new Blob([pt], {type:type || 'audio/mpeg'});
+}
+async function raUpload(k, x){
+  const blob = await musicGet(raId(k,x)); if(!blob) throw new Error('fichier local absent');
+  const {error} = await supa.storage.from(RA_BUCKET).upload(raPath(k,x), await raEncrypt(blob), {contentType:'application/octet-stream', upsert:true});
+  if(error) throw error;
+}
+async function raDownload(k, x){
+  const {data, error} = await supa.storage.from(RA_BUCKET).download(raPath(k,x));
+  if(error) throw error;
+  const blob = await raDecrypt(await data.arrayBuffer(), x.type);
+  await musicPut(raId(k,x), blob);
+  return blob;
+}
+function raRemoveRemote(k, x){ try{ if(supa && vault.userId) Promise.resolve(supa.storage.from(RA_BUCKET).remove([raPath(k,x)])).catch(()=>{}); }catch(e){} }
+async function raPrune(){
+  try{
+    const keep = new Set(RA_SLOTS.map(([k])=>{ const x = raLive(k); return x && raId(k,x); }));
+    const keys = await musicTx('readonly', st=> st.getAllKeys());
+    for(const key of (keys||[])) if(String(key).startsWith('rules_') && !keep.has(key)) await musicDel(key);
+  }catch(e){}
+}
+async function raWipeLocal(){
+  raStop(); rulesAudio = raNormalize(null); try{ localStorage.removeItem(LS_RULES_AUDIO); }catch(e){}
+  try{ const keys = await musicTx('readonly', st=> st.getAllKeys()); for(const key of (keys||[])) if(String(key).startsWith('rules_')) await musicDel(key); }catch(e){}
+}
+
+/* lecteur */
+function raEl(){
+  if(!raPlayer.el){
+    const el = new Audio(); el.preload = 'auto';
+    ['play','pause','ended'].forEach(ev=> el.addEventListener(ev, ()=> raRender()));
+    ['timeupdate','loadedmetadata'].forEach(ev=> el.addEventListener(ev, raTick));
+    raPlayer.el = el;
+  }
+  return raPlayer.el;
+}
+const raPlaying = k=> !!(raPlayer.el && raPlayer.key===k && !raPlayer.el.paused);
+function raStop(){
+  if(raPlayer.el){ raPlayer.el.pause(); raPlayer.el.removeAttribute('src'); try{ raPlayer.el.load(); }catch(e){} }
+  if(raPlayer.url){ URL.revokeObjectURL(raPlayer.url); raPlayer.url = null; }
+  raPlayer.key = null; raPlayer.rev = null;
+  raRender();
+}
+async function raToggle(k){
+  const el = raEl();
+  if(raPlaying(k)){ el.pause(); return; }
+  const x = raLive(k); if(!x) return;
+  if(raPlayer.key===k && raPlayer.rev===x.rev && el.src){ await el.play(); return; }
+  if(music.id) musicStop(); /* une seule source sonore à la fois */
+  const blob = await musicGet(raId(k,x)); if(!blob) throw new Error('absent');
+  if(raPlayer.url) URL.revokeObjectURL(raPlayer.url);
+  raPlayer.url = URL.createObjectURL(blob);
+  el.src = raPlayer.url; el.volume = musicVolume();
+  raPlayer.key = k; raPlayer.rev = x.rev;
+  await el.play();
+}
+const raFmt = t=>{ t = Math.max(0, Math.floor(t||0)); return Math.floor(t/60)+':'+String(t%60).padStart(2,'0'); };
+function raTick(){
+  if(!ra.rows || !ra.rows.isConnected || !raPlayer.el || !raPlayer.key) return;
+  const el = raPlayer.el, seek = ra.rows.querySelector('.ra-seek'), tm = ra.rows.querySelector('.ra-time');
+  if(seek && !ra.dragging && el.duration) seek.value = Math.round(el.currentTime/el.duration*1000);
+  if(tm) tm.textContent = raFmt(el.currentTime)+' / '+raFmt(el.duration);
+}
+
+/* ajout / retrait / synchronisation */
+async function raAdd(k, file){
+  if(!/^audio\//.test(file.type) && !/\.(mp3|m4a|aac|wav|ogg)$/i.test(file.name)){ ra.note = '« '+file.name+' » n’est pas un fichier audio.'; return raRender(); }
+  if(file.size > RA_MAX){ ra.note = 'Fichier trop lourd ('+Math.round(file.size/1048576)+' Mo) : 45 Mo maximum.'; return raRender(); }
+  const old = raLive(k);
+  const x = {rev:Date.now(), name:file.name.replace(/\.[^.]+$/,''), size:file.size, type:file.type || 'audio/mpeg', cloud:false};
+  try{ await musicPut(raId(k,x), file); }catch(e){ ra.note = 'Le fichier n’a pas pu être enregistré sur cet appareil (espace insuffisant ?).'; return raRender(); }
+  if(raPlayer.key===k) raStop();
+  rulesAudio[k] = x; raPersist(false); /* pas de synchro tant que le fichier n'est pas parti : les autres appareils ne verraient qu'une piste introuvable */
+  if(old){ musicDel(raId(k,old)); raRemoveRemote(k, old); }
+  ra.busy[k] = 'up'; ra.note = ''; raRender();
+  if(vaultReady()){
+    try{ await raUpload(k,x); x.cloud = true; }catch(e){ ra.note = raErrMsg(e); }
+  }else ra.note = 'Hors connexion : la piste sera envoyée à la prochaine ouverture connectée.';
+  ra.busy[k] = null; raPersist(true);
+  await raRefresh();
+}
+async function raRemove(k){
+  const x = raLive(k); if(!x) return;
+  if(raPlayer.key===k) raStop();
+  rulesAudio[k] = {rev:Date.now(), removed:true}; raPersist(true);
+  await musicDel(raId(k,x)); raRemoveRemote(k, x);
+  ra.note = ''; await raRefresh();
+}
+/* envoie ce qui n'est pas encore parti, et récupère les pistes ajoutées depuis un autre appareil */
+async function raSyncAll(){
+  if(ra.running || !vaultReady()) return;
+  ra.running = true;
+  try{
+    for(const [k] of RA_SLOTS){
+      const x = raLive(k); if(!x) continue;
+      const has = !!(await musicGet(raId(k,x)).catch(()=> null));
+      if(!has && x.cloud){
+        ra.busy[k] = 'dl'; raRender();
+        try{ await raDownload(k,x); ra.note = ''; }catch(e){ ra.note = 'Téléchargement de la piste impossible pour le moment.'; }
+        ra.busy[k] = null;
+      }else if(has && !x.cloud){
+        ra.busy[k] = 'up'; raRender();
+        try{ await raUpload(k,x); x.cloud = true; ra.note = ''; if(rulesAudio[k]===x) raPersist(true); }catch(e){ ra.note = raErrMsg(e); }
+        ra.busy[k] = null;
+      }
+    }
+  }finally{ ra.running = false; await raRefresh(); }
+}
+async function raRefresh(){
+  const h = {};
+  await Promise.all(RA_SLOTS.map(async ([k])=>{ const x = raLive(k); h[k] = x ? !!(await musicGet(raId(k,x)).catch(()=> null)) : false; }));
+  ra.have = h; raRender(); raPrune();
+}
+
+function raRender(){
+  if(!ra.rows || !ra.rows.isConnected) return;
+  const can = !!vault.userId;
+  ra.rows.innerHTML = RA_SLOTS.map(([k, label])=>{
+    const x = raLive(k), busy = ra.busy[k], has = !!ra.have[k], on = raPlaying(k), active = raPlayer.key===k && raPlayer.el && raPlayer.el.src;
+    let st = '';
+    if(!x) st = 'Aucune piste';
+    else if(busy==='up') st = 'envoi vers ton compte…';
+    else if(busy==='dl') st = 'téléchargement…';
+    else if(!has) st = x.cloud ? 'pas encore sur cet appareil' : 'pas encore disponible (envoi non terminé depuis l’autre appareil)';
+    else if(!x.cloud) st = 'sur cet appareil seulement';
+    const name = x ? escapeHtml(x.name)+(st?' · ':'') : '';
+    return `<div class="ra-row">
+      <button type="button" class="ra-play" data-play="${k}" ${x && has && !busy ? '' : 'disabled'} aria-label="${on?'Pause':'Écouter'} : ${label.toLowerCase()}">${on?'❚❚':'▶'}</button>
+      <div class="ra-main"><span class="ra-label">${label}</span><span class="ra-name">${name}${st}</span>
+        ${active ? `<div class="ra-seekrow"><input type="range" class="ra-seek" min="0" max="1000" value="0" aria-label="Position"><span class="ra-time">0:00 / 0:00</span></div>` : ''}</div>
+      ${can ? (x ? `<button type="button" class="ra-btn" data-change="${k}" ${busy?'disabled':''}>Changer</button><button type="button" class="ra-btn" data-del="${k}" title="Retirer" ${busy?'disabled':''}>✕</button>`
+                 : `<button type="button" class="ra-btn" data-change="${k}" ${busy?'disabled':''}>+ Ajouter</button>`) : ''}
+    </div>`;
+  }).join('') + (ra.note ? `<p class="ra-note">${escapeHtml(ra.note)}</p>` : '');
+  ra.rows.querySelectorAll('[data-play]').forEach(b=> b.addEventListener('click', ()=>{
+    raToggle(b.dataset.play).catch(()=>{ ra.note = 'Lecture impossible : appuie une nouvelle fois sur ▶ (le navigateur a peut-être bloqué le démarrage).'; raRender(); });
+  }));
+  ra.rows.querySelectorAll('[data-change]').forEach(b=> b.addEventListener('click', ()=>{ ra.input.dataset.k = b.dataset.change; ra.input.click(); }));
+  ra.rows.querySelectorAll('[data-del]').forEach(b=> b.addEventListener('click', ()=>{
+    if(!b.classList.contains('armed')){
+      b.classList.add('armed'); b.textContent = 'Retirer ?';
+      setTimeout(()=>{ if(b.isConnected){ b.classList.remove('armed'); b.textContent = '✕'; } }, 3000);
+      return;
+    }
+    raRemove(b.dataset.del);
+  }));
+  const seek = ra.rows.querySelector('.ra-seek');
+  if(seek){
+    ['pointerdown','touchstart'].forEach(ev=> seek.addEventListener(ev, ()=>{ ra.dragging = true; }, {passive:true}));
+    seek.addEventListener('input', ()=>{ const el = raPlayer.el; if(el && el.duration) el.currentTime = seek.value/1000*el.duration; });
+    seek.addEventListener('change', ()=>{ ra.dragging = false; });
+    ['pointerup','touchend','pointercancel'].forEach(ev=> seek.addEventListener(ev, ()=>{ ra.dragging = false; }, {passive:true}));
+    seek.addEventListener('keydown', e=> e.stopPropagation()); /* les flèches ne doivent pas changer de page */
+    raTick();
+  }
+}
+function raMount(box){
+  box.innerHTML = '<div class="ra-rows"></div><input type="file" accept="audio/*,.mp3,.m4a,.wav,.aac" hidden>';
+  ra.rows = box.querySelector('.ra-rows'); ra.input = box.querySelector('input');
+  ra.note = '';
+  ra.input.addEventListener('change', ()=>{ const f = ra.input.files[0], k = ra.input.dataset.k; ra.input.value = ''; if(f && k) raAdd(k, f); });
+  raRender(); raRefresh(); raSyncAll();
+}
+
 /* ================= COMMANDEMENTS ================= */
 /* un commandement = {id, text, subs:[{id, text}]} : les « subs » sont les règles plus précises qui le détaillent */
 const LS_RULES_COMPACT = 'soloemdr_rules_compact';
@@ -2497,6 +2723,7 @@ function renderRules(){
     </div>
     <h2 class="instruction fs">Commandements</h2>
     <div class="sel-scroll">
+      ${canEdit || RA_SLOTS.some(([k])=> raLive(k)) ? '<div class="ra-box fs" id="ra-box" style="animation-delay:.2s;"></div>' : ''}
       ${shown.length ? `<ol class="rules-list fs" style="animation-delay:.3s;">${shown.map(x=>{
           const subs = ruleSubs(x);
           return `<li${subs.length && compact ? ' class="collapsed"' : ''}><div class="rule-body"><div class="rule-head${subs.length?' has-subs':''}"${subs.length ? ` role="button" tabindex="0" aria-expanded="${compact?'false':'true'}"` : ''}><span>${escapeHtml(x.text||'').replace(/\n/g,'<br>')}</span></div>`
@@ -2505,6 +2732,7 @@ function renderRules(){
         : `<div class="sel-list fs" style="animation-delay:.3s; width:min(680px,92%);"><p class="sub">${canEdit ? 'Aucun commandement pour l’instant. Ajoutez-les avec « Modifier » (vous pouvez aussi coller toute une liste).' : 'Connectez-vous pour ajouter ou modifier vos commandements.'}</p></div>`}
     </div>`;
   document.body.classList.add('hide-l','hide-r');
+  const raBox = s.querySelector('#ra-box'); if(raBox) raMount(raBox);
   const edit = s.querySelector('#rules-edit');
   if(edit) edit.addEventListener('click', ()=> openRulesModal(()=> renderRules()));
   const view = s.querySelector('#rules-view');

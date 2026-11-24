@@ -407,7 +407,10 @@
   .rule-subs{ margin:0; padding:0 0 0 1.1em; list-style:disc; color:var(--ink-soft); font-size:14px; line-height:1.55; display:flex; flex-direction:column; gap:3px; }
   .rules-list .rule-subs li{ display:list-item; counter-increment:none; font-size:14px; gap:0; }
   .rules-list .rule-subs li::before{ content:none; }
-  .ra-box{ width:min(680px,92%); margin:4px 0 6px; }
+  .rl-audio{ margin:0 0 10px; border:1px solid var(--line); border-radius:12px; padding:8px 10px; text-align:left; }
+  .rl-audio summary{ cursor:pointer; font-size:13.5px; color:var(--ink-soft); }
+  .rl-audio[open] summary{ margin-bottom:8px; }
+  .modal-panel .ra-row{ background:var(--bg-soft); }
   .ra-rows{ display:flex; flex-direction:column; gap:8px; }
   .ra-row{ display:flex; align-items:center; gap:10px; border:1px solid var(--line); background:var(--surface); border-radius:12px; padding:8px 10px; text-align:left; }
   .ra-play{ flex:0 0 auto; width:38px; height:38px; border-radius:50%; border:1px solid var(--teal); background:none; color:var(--teal); font-size:13px; cursor:pointer; padding:0; }
@@ -2499,7 +2502,7 @@ function openPartsModal(onClose){
 /* ---- pistes audio des commandements ---- */
 const RA_SLOTS = [['compact','Version simplifiée'], ['detailed','Version détaillée']];
 const RA_BUCKET = 'audio', RA_MAX = 45*1024*1024; /* la limite par fichier du stockage gratuit est de 50 Mo */
-const ra = {have:{}, busy:{}, note:'', rows:null, input:null, dragging:false, running:false};
+const ra = {have:{}, busy:{}, note:'', rows:null, input:null, edit:false, dragging:false, running:false};
 const raPlayer = {el:null, key:null, rev:null, url:null};
 const raLive = k=>{ const x = rulesAudio[k]; return x && !x.removed ? x : null; };
 const raId = (k, x)=> 'rules_'+k+'_'+x.rev;
@@ -2635,7 +2638,7 @@ async function raRefresh(){
 
 function raRender(){
   if(!ra.rows || !ra.rows.isConnected) return;
-  const can = !!vault.userId;
+  const edit = ra.edit && !!vault.userId;
   ra.rows.innerHTML = RA_SLOTS.map(([k, label])=>{
     const x = raLive(k), busy = ra.busy[k], has = !!ra.have[k], on = raPlaying(k), active = raPlayer.key===k && raPlayer.el && raPlayer.el.src;
     let st = '';
@@ -2646,13 +2649,13 @@ function raRender(){
     else if(!x.cloud) st = 'sur cet appareil seulement';
     const name = x ? escapeHtml(x.name)+(st?' · ':'') : '';
     return `<div class="ra-row">
-      <button type="button" class="ra-play" data-play="${k}" ${x && has && !busy ? '' : 'disabled'} aria-label="${on?'Pause':'Écouter'} : ${label.toLowerCase()}">${on?'❚❚':'▶'}</button>
+      ${edit ? '' : `<button type="button" class="ra-play" data-play="${k}" ${x && has && !busy ? '' : 'disabled'} aria-label="${on?'Pause':'Écouter'} : ${label.toLowerCase()}">${on?'❚❚':'▶'}</button>`}
       <div class="ra-main"><span class="ra-label">${label}</span><span class="ra-name">${name}${st}</span>
-        ${active ? `<div class="ra-seekrow"><input type="range" class="ra-seek" min="0" max="1000" value="0" aria-label="Position"><span class="ra-time">0:00 / 0:00</span></div>` : ''}</div>
-      ${can ? (x ? `<button type="button" class="ra-btn" data-change="${k}" ${busy?'disabled':''}>Changer</button><button type="button" class="ra-btn" data-del="${k}" title="Retirer" ${busy?'disabled':''}>✕</button>`
+        ${active && !edit ? `<div class="ra-seekrow"><input type="range" class="ra-seek" min="0" max="1000" value="0" aria-label="Position"><span class="ra-time">0:00 / 0:00</span></div>` : ''}</div>
+      ${edit ? (x ? `<button type="button" class="ra-btn" data-change="${k}" ${busy?'disabled':''}>Changer</button><button type="button" class="ra-btn" data-del="${k}" title="Retirer" ${busy?'disabled':''}>✕</button>`
                  : `<button type="button" class="ra-btn" data-change="${k}" ${busy?'disabled':''}>+ Ajouter</button>`) : ''}
     </div>`;
-  }).join('') + (ra.note ? `<p class="ra-note">${escapeHtml(ra.note)}</p>` : '');
+  }).join('') + (!ra.edit && !RA_SLOTS.some(([k])=> raLive(k)) ? '<p class="ra-note">Aucune piste pour l’instant. Ajoutez-les depuis « Modifier » (section Audio).</p>' : '') + (ra.note ? `<p class="ra-note">${escapeHtml(ra.note)}</p>` : '');
   ra.rows.querySelectorAll('[data-play]').forEach(b=> b.addEventListener('click', ()=>{
     raToggle(b.dataset.play).catch(()=>{ ra.note = 'Lecture impossible : appuie une nouvelle fois sur ▶ (le navigateur a peut-être bloqué le démarrage).'; raRender(); });
   }));
@@ -2675,12 +2678,30 @@ function raRender(){
     raTick();
   }
 }
-function raMount(box){
+function raMount(box, edit){
+  ra.edit = !!edit;
   box.innerHTML = '<div class="ra-rows"></div><input type="file" accept="audio/*,.mp3,.m4a,.wav,.aac" hidden>';
   ra.rows = box.querySelector('.ra-rows'); ra.input = box.querySelector('input');
   ra.note = '';
   ra.input.addEventListener('change', ()=>{ const f = ra.input.files[0], k = ra.input.dataset.k; ra.input.value = ''; if(f && k) raAdd(k, f); });
   raRender(); raRefresh(); raSyncAll();
+}
+
+/* Modale « Audio » : écoute seulement (ajout/changement/retrait se font dans « Modifier ») */
+function openRulesAudioModal(){
+  const overlay = document.createElement('div'); overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-panel" role="dialog" aria-label="Audio des commandements">
+      <div class="modal-head"><h3>Audio des commandements</h3></div>
+      <div class="modal-body" id="ra-modal-box"></div>
+      <div class="modal-foot"><button type="button" id="ra-modal-done" class="primary">Fermer</button></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = ()=>{ raStop(); overlay.remove(); };
+  overlay.addEventListener('keydown', e=>{ e.stopPropagation(); if(e.key==='Escape') close(); });
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) close(); });
+  overlay.querySelector('#ra-modal-done').addEventListener('click', close);
+  raMount(overlay.querySelector('#ra-modal-box'), false);
 }
 
 /* ================= COMMANDEMENTS ================= */
@@ -2718,12 +2739,12 @@ function renderRules(){
   const hasSubs = shown.some(x=> ruleSubs(x).length);
   s.innerHTML = `
     <div class="rules-bar">
+      ${canEdit || RA_SLOTS.some(([k])=> raLive(k)) ? '<button class="pill-btn" id="rules-audio">Audio</button>' : ''}
       ${hasSubs ? `<button class="pill-btn" id="rules-view">${compact ? 'Vue détaillée' : 'Vue simplifiée'}</button>` : ''}
       ${canEdit ? '<button class="pill-btn emb-edit-btn" id="rules-edit">Modifier</button>' : ''}
     </div>
     <h2 class="instruction fs">Commandements</h2>
     <div class="sel-scroll">
-      ${canEdit || RA_SLOTS.some(([k])=> raLive(k)) ? '<div class="ra-box fs" id="ra-box" style="animation-delay:.2s;"></div>' : ''}
       ${shown.length ? `<ol class="rules-list fs" style="animation-delay:.3s;">${shown.map(x=>{
           const subs = ruleSubs(x);
           return `<li${subs.length && compact ? ' class="collapsed"' : ''}><div class="rule-body"><div class="rule-head${subs.length?' has-subs':''}"${subs.length ? ` role="button" tabindex="0" aria-expanded="${compact?'false':'true'}"` : ''}><span>${escapeHtml(x.text||'').replace(/\n/g,'<br>')}</span></div>`
@@ -2732,7 +2753,8 @@ function renderRules(){
         : `<div class="sel-list fs" style="animation-delay:.3s; width:min(680px,92%);"><p class="sub">${canEdit ? 'Aucun commandement pour l’instant. Ajoutez-les avec « Modifier » (vous pouvez aussi coller toute une liste).' : 'Connectez-vous pour ajouter ou modifier vos commandements.'}</p></div>`}
     </div>`;
   document.body.classList.add('hide-l','hide-r');
-  const raBox = s.querySelector('#ra-box'); if(raBox) raMount(raBox);
+  const audioBtn = s.querySelector('#rules-audio');
+  if(audioBtn) audioBtn.addEventListener('click', openRulesAudioModal);
   const edit = s.querySelector('#rules-edit');
   if(edit) edit.addEventListener('click', ()=> openRulesModal(()=> renderRules()));
   const view = s.querySelector('#rules-view');
@@ -2763,6 +2785,7 @@ function openRulesModal(onClose){
   overlay.innerHTML = `
     <div class="modal-panel" role="dialog" aria-label="Modifier les commandements">
       <div class="modal-head"><h3>Modifier les commandements</h3></div>
+      <details class="rl-audio" id="rl-audio"><summary>Pistes audio</summary><div id="rl-audio-box"></div></details>
       <div class="modal-body" id="rl-list"></div>
       <div class="modal-import" id="rl-import" style="display:none;">
         <textarea id="rl-import-text" placeholder="Collez ici votre liste : « 1. Commandement » puis ses règles en puces (* ou -) ou en retrait"></textarea>
@@ -2775,6 +2798,8 @@ function openRulesModal(onClose){
       </div>
     </div>`;
   document.body.appendChild(overlay);
+  const audioDet = overlay.querySelector('#rl-audio'); let audioMounted = false;
+  audioDet.addEventListener('toggle', ()=>{ if(audioDet.open && !audioMounted){ audioMounted = true; raMount(overlay.querySelector('#rl-audio-box'), true); } });
   const listEl = overlay.querySelector('#rl-list');
   const auto = t=>{ t.style.height='auto'; t.style.height = t.scrollHeight+'px'; };
   const arm = (b, label)=>{
@@ -2849,6 +2874,7 @@ function openRulesModal(onClose){
     items.forEach(it=>{ if(!(it.text||'').trim()) it.text = 'Sans titre'; });
     rulesItems = items; commit();
     overlay.remove();
+    ra.rows = null;
     if(onClose) onClose();
   };
   /* le clavier ne doit pas piloter l'écran en dessous (Entrée = écran suivant, etc.) */
